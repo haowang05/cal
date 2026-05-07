@@ -1,0 +1,10 @@
+.env
+.DS_Store
+.pycache/
+__pycache__/
+*.pyc
+temp/
+public/
+dingtalk_events_*/
+tencent_events_*/
+feishu_events_*/
