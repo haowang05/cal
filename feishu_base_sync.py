@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import hashlib
 import re
 import time
 from datetime import datetime, timezone
@@ -45,6 +46,7 @@ class FeishuBaseSync:
             return None
         raw = value.strip().replace("\r", "")
         key = (key or "").strip()
+
         tz_name = None
         tz_match = re.search(r"TZID=([^;:]+)", key)
         if tz_match:
@@ -69,7 +71,6 @@ class FeishuBaseSync:
                     dt = datetime.strptime(raw, "%Y%m%dT%H%M")
                 else:
                     return None
-                # CalDAV 浮动时间默认按 TZID 解释；未提供 TZID 时按业务主时区处理
                 dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
                 return int(dt.timestamp() * 1000)
             if len(raw) == 8:
@@ -79,7 +80,7 @@ class FeishuBaseSync:
         except Exception:
             pass
 
-        # 兜底：从任意 CalDAV 时间字符串中提取 YYYYMMDD + 可选 HHMMSS
+        # 兜底：从任意字符串中提取 YYYYMMDD + 可选 HHMMSS
         m = re.search(r"(\d{8})(?:T(\d{4,6}))?", raw)
         if not m:
             return None
@@ -98,6 +99,11 @@ class FeishuBaseSync:
             return int(dt.timestamp() * 1000)
         except Exception:
             return None
+
+    @staticmethod
+    def _event_key(event: Dict[str, str]) -> str:
+        seed = f"{event.get('source','')}|{event.get('uid','')}|{event.get('dtstart','')}"
+        return hashlib.sha1(seed.encode("utf-8")).hexdigest()
 
     def _list_all_records(self) -> List[Dict]:
         url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
@@ -122,7 +128,7 @@ class FeishuBaseSync:
         index: Dict[str, str] = {}
         for item in self._list_all_records():
             fields = item.get("fields", {})
-            key = fields.get("标题")
+            key = fields.get("event_key")
             if isinstance(key, list):
                 key = key[0] if key else None
             if key:
@@ -133,28 +139,28 @@ class FeishuBaseSync:
         start_ms = self._to_unix_ms(event.get("dtstart", ""), event.get("dtstart_key", ""))
         end_ms = self._to_unix_ms(event.get("dtend", ""), event.get("dtend_key", ""))
         return {
-            "标题": event.get("summary", ""),
-            "来源": event.get("source", ""),
-            "地点": event.get("location", ""),
-            "状态": event.get("status", ""),
-            "开始时间": start_ms,
-            "结束时间": end_ms,
-            "更新时间": int(time.time() * 1000),
+            "event_key": self._event_key(event),
+            "source": event.get("source", ""),
+            "calendar_name": event.get("calendar_name", ""),
+            "summary": event.get("summary", ""),
+            "description": event.get("description", ""),
+            "location": event.get("location", ""),
+            "start_time": start_ms,
+            "end_time": end_ms,
+            "uid": event.get("uid", ""),
+            "status": event.get("status", ""),
+            "updated_at": int(time.time() * 1000),
         }
 
     def upsert_events(self, events: List[Dict[str, str]]) -> Dict[str, int]:
         existing = self._build_existing_index()
         create_count = 0
         update_count = 0
-        failed_count = 0
-        first_error = None
         create_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
 
         for event in events:
             fields = self._build_fields(event)
-            key = fields.get("标题")
-            if not key:
-                continue
+            key = fields["event_key"]
             record_id = existing.get(key)
             if record_id:
                 update_url = f"{create_url}/{record_id}"
@@ -162,17 +168,9 @@ class FeishuBaseSync:
                 data = resp.json()
                 if data.get("code") == 0:
                     update_count += 1
-                else:
-                    failed_count += 1
-                    if first_error is None:
-                        first_error = data
             else:
                 resp = requests.post(create_url, headers=self._headers(), json={"fields": fields}, timeout=20)
                 data = resp.json()
                 if data.get("code") == 0:
                     create_count += 1
-                else:
-                    failed_count += 1
-                    if first_error is None:
-                        first_error = data
-        return {"created": create_count, "updated": update_count, "failed": failed_count, "first_error": first_error}
+        return {"created": create_count, "updated": update_count}
