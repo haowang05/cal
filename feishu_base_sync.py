@@ -128,6 +128,12 @@ class FeishuBaseSync:
         seed = f"{event.get('source','')}|{event.get('uid','')}|{event.get('dtstart','')}"
         return hashlib.sha1(seed.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _event_id(event: Dict[str, str]) -> str:
+        # 稳定生成 10 位 ID：避免每次运行变化导致重复写入
+        seed = f"{event.get('source','')}|{event.get('uid','')}|{event.get('dtstart','')}"
+        return hashlib.sha1(seed.encode("utf-8")).hexdigest()[:10]
+
     def _list_all_records(self) -> List[Dict]:
         url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
         items = []
@@ -149,12 +155,12 @@ class FeishuBaseSync:
 
     def _build_existing_index(self) -> Dict[str, str]:
         index: Dict[str, str] = {}
-        event_key_field = self._field_name("event_key")
-        if not event_key_field:
+        key_field = self._field_name("event_id") or self._field_name("event_key")
+        if not key_field:
             return index
         for item in self._list_all_records():
             fields = item.get("fields", {})
-            key = fields.get(event_key_field)
+            key = fields.get(key_field)
             if isinstance(key, list):
                 key = key[0] if key else None
             if key:
@@ -182,6 +188,7 @@ class FeishuBaseSync:
 
     def _field_aliases(self) -> Dict[str, List[str]]:
         return {
+            "event_id": ["eventID", "eventId", "event_id", "事件ID"],
             "event_key": ["event_key", "事件唯一键", "唯一键"],
             "source": ["source", "来源", "日历来源"],
             "calendar_name": ["calendar_name", "日历名", "日历名称"],
@@ -215,6 +222,7 @@ class FeishuBaseSync:
         start_ms = self._to_unix_ms(event.get("dtstart", ""), event.get("dtstart_key", ""))
         end_ms = self._to_unix_ms(event.get("dtend", ""), event.get("dtend_key", ""))
         canonical_values = {
+            "event_id": self._event_id(event),
             "event_key": self._event_key(event),
             "source": event.get("source", ""),
             "calendar_name": event.get("calendar_name", ""),
@@ -254,7 +262,7 @@ class FeishuBaseSync:
                     if sample not in missing_start_samples:
                         missing_start_samples.append(sample)
             fields = self._build_fields(event)
-            key = self._event_key(event)
+            key = self._event_id(event) if self._field_name("event_id") else self._event_key(event)
             if not fields:
                 failed_count += 1
                 if first_error is None:
