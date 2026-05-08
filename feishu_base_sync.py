@@ -156,6 +156,8 @@ class FeishuBaseSync:
         existing = self._build_existing_index()
         create_count = 0
         update_count = 0
+        failed_count = 0
+        first_error = None
         create_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
 
         for event in events:
@@ -168,9 +170,17 @@ class FeishuBaseSync:
                 data = resp.json()
                 if data.get("code") == 0:
                     update_count += 1
+                else:
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = f"更新失败 code={data.get('code')} msg={data.get('msg')} event_key={key}"
             else:
                 resp = requests.post(create_url, headers=self._headers(), json={"fields": fields}, timeout=20)
                 data = resp.json()
                 if data.get("code") == 0:
                     create_count += 1
-        return {"created": create_count, "updated": update_count}
+                else:
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = f"创建失败 code={data.get('code')} msg={data.get('msg')} event_key={key}"
+        return {"created": create_count, "updated": update_count, "failed": failed_count, "first_error": first_error}

@@ -26,15 +26,23 @@ class ConfigManager:
         self.load_config()
 
     def load_config(self):
-        if not os.path.exists(self.env_file):
-            raise FileNotFoundError(f"配置文件 {self.env_file} 不存在")
+        if os.path.exists(self.env_file):
+            with open(self.env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
+                        self.config[key.strip()] = value.strip()
 
-        with open(self.env_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    self.config[key.strip()] = value.strip()
+        # 允许通过系统环境变量覆盖 .env，兼容 GitHub Actions secrets 场景
+        for key, value in os.environ.items():
+            if value is None:
+                continue
+            if key in self.config or key.startswith(("APP_", "TABLE_", "DINGTALK_", "TENCENT_", "FEISHU_", "ICS_")):
+                self.config[key] = value
+
+        if not self.config:
+            raise FileNotFoundError(f"配置文件 {self.env_file} 不存在，且未检测到可用环境变量")
 
         self._parse_accounts()
 
@@ -43,9 +51,9 @@ class ConfigManager:
 
         for account_type in account_types:
             account_name = self.config.get(f"{account_type}_ACCOUNT_NAME")
-            username = self.config.get(f"{account_type}_USERNAME")
-            password = self.config.get(f"{account_type}_PASSWORD")
-            url = self.config.get(f"{account_type}_URL")
+            username = self.config.get(f"{account_type}_USERNAME") or self.config.get(f"{account_type}_CALDAV_USERNAME")
+            password = self.config.get(f"{account_type}_PASSWORD") or self.config.get(f"{account_type}_CALDAV_PASSWORD")
+            url = self.config.get(f"{account_type}_URL") or self.config.get(f"{account_type}_CALDAV_URL")
 
             if all([account_name, username, password, url]):
                 self.accounts.append(

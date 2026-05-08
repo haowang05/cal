@@ -90,7 +90,16 @@ class CalDAVSyncManager:
         if not all([app_id, app_secret, app_token, table_id]):
             print("未配置飞书 Base 所需 APP_ID/APP_SECRET/APP_TOKEN/TABLE_ID，跳过写入。")
             return False
+        skip_holiday = str(self.config_manager.get_global_config("SKIP_HOLIDAY_CALENDAR", "true")).lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+
         def should_skip(event: dict) -> bool:
+            if not skip_holiday:
+                return False
             name = str(event.get("calendar_name", "")).strip()
             return ("国务院假期及传统节日" in name) or ("节假日" in name and "国务院" in name)
 
@@ -99,6 +108,8 @@ class CalDAVSyncManager:
         print(f"写入前事件统计: 原始 {len(events)}，过滤后 {len(filtered_events)}")
         if skipped:
             print(f"已过滤 {skipped} 条节假日日历事件（2026国务院假期及传统节日）")
+        if not filtered_events:
+            print("过滤后无可写入事件，请检查过滤规则或同步时间窗口。")
         client = FeishuBaseSync(app_id, app_secret, app_token, table_id)
         result = client.upsert_events(filtered_events)
         print(
