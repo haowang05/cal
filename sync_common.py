@@ -18,8 +18,10 @@ def parse_ics_content(ics_data: str) -> Dict[str, str]:
             event_info["summary"] = value
         elif key.startswith("DTSTART"):
             event_info["dtstart"] = value
+            event_info["dtstart_key"] = key
         elif key.startswith("DTEND"):
             event_info["dtend"] = value
+            event_info["dtend_key"] = key
         elif key == "LOCATION":
             event_info["location"] = value
         elif key == "DESCRIPTION":

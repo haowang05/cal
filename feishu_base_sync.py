@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -39,14 +40,27 @@ class FeishuBaseSync:
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
 
     @staticmethod
-    def _to_unix_ms(value: str) -> Optional[int]:
+    def _to_unix_ms(value: str, key: str = "") -> Optional[int]:
         if not value:
             return None
         raw = value.strip().replace("\r", "")
-        raw = re.sub(r"([+-]\d{4})$", "", raw)
+        key = (key or "").strip()
+        tz_name = None
+        tz_match = re.search(r"TZID=([^;:]+)", key)
+        if tz_match:
+            tz_name = tz_match.group(1)
+
+        explicit_offset = None
+        offset_match = re.search(r"([+-]\d{4})$", raw)
+        if offset_match:
+            explicit_offset = offset_match.group(1)
+
         try:
             if raw.endswith("Z"):
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                return int(dt.timestamp() * 1000)
+            if explicit_offset:
+                dt = datetime.strptime(raw, "%Y%m%dT%H%M%S%z")
                 return int(dt.timestamp() * 1000)
             if "T" in raw:
                 if len(raw) == 15:
@@ -55,9 +69,12 @@ class FeishuBaseSync:
                     dt = datetime.strptime(raw, "%Y%m%dT%H%M")
                 else:
                     return None
+                # CalDAV 浮动时间默认按 TZID 解释；未提供 TZID 时按业务主时区处理
+                dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
                 return int(dt.timestamp() * 1000)
             if len(raw) == 8:
                 dt = datetime.strptime(raw, "%Y%m%d")
+                dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
                 return int(dt.timestamp() * 1000)
         except Exception:
             pass
@@ -77,6 +94,7 @@ class FeishuBaseSync:
                 dt = datetime.strptime(f"{day}T{t}", "%Y%m%dT%H%M%S")
             else:
                 return None
+            dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
             return int(dt.timestamp() * 1000)
         except Exception:
             return None
@@ -112,8 +130,8 @@ class FeishuBaseSync:
         return index
 
     def _build_fields(self, event: Dict[str, str]) -> Dict:
-        start_ms = self._to_unix_ms(event.get("dtstart", ""))
-        end_ms = self._to_unix_ms(event.get("dtend", ""))
+        start_ms = self._to_unix_ms(event.get("dtstart", ""), event.get("dtstart_key", ""))
+        end_ms = self._to_unix_ms(event.get("dtend", ""), event.get("dtend_key", ""))
         return {
             "标题": event.get("summary", ""),
             "来源": event.get("source", ""),
