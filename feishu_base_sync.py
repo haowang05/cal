@@ -41,6 +41,15 @@ class FeishuBaseSync:
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
 
     @staticmethod
+    def _sanitize_epoch_ms(value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        # 飞书显示 1970 通常意味着写入了 0 或异常小时间戳，这里直接拦截
+        if value < 946684800000:  # 2000-01-01 00:00:00 UTC
+            return None
+        return value
+
+    @staticmethod
     def _to_unix_ms(value: str, key: str = "") -> Optional[int]:
         if not value:
             return None
@@ -62,22 +71,22 @@ class FeishuBaseSync:
             if raw.isdigit():
                 ts = int(raw)
                 if ts > 10_000_000_000:  # ms
-                    return ts
+                    return FeishuBaseSync._sanitize_epoch_ms(ts)
                 if ts > 1_000_000_000:  # s
-                    return ts * 1000
+                    return FeishuBaseSync._sanitize_epoch_ms(ts * 1000)
             if raw.endswith("Z"):
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-                return int(dt.timestamp() * 1000)
+                return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
             if explicit_offset:
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%S%z")
-                return int(dt.timestamp() * 1000)
+                return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
             # 支持 ISO-8601（例如 2026-05-08T09:00:00+08:00）
             if "-" in raw and "T" in raw:
                 iso = raw.replace("Z", "+00:00")
                 dt = datetime.fromisoformat(iso)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
-                return int(dt.timestamp() * 1000)
+                return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
             if "T" in raw:
                 if len(raw) == 15:
                     dt = datetime.strptime(raw, "%Y%m%dT%H%M%S")
@@ -86,11 +95,11 @@ class FeishuBaseSync:
                 else:
                     return None
                 dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
-                return int(dt.timestamp() * 1000)
+                return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
             if len(raw) == 8:
                 dt = datetime.strptime(raw, "%Y%m%d")
                 dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
-                return int(dt.timestamp() * 1000)
+                return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
         except Exception:
             pass
 
@@ -110,7 +119,7 @@ class FeishuBaseSync:
             else:
                 return None
             dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
-            return int(dt.timestamp() * 1000)
+            return FeishuBaseSync._sanitize_epoch_ms(int(dt.timestamp() * 1000))
         except Exception:
             return None
 
@@ -233,9 +242,17 @@ class FeishuBaseSync:
         update_count = 0
         failed_count = 0
         first_error = None
+        missing_start_count = 0
+        missing_start_samples = []
         create_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
 
         for event in events:
+            if event.get("dtstart") and self._to_unix_ms(event.get("dtstart", ""), event.get("dtstart_key", "")) is None:
+                missing_start_count += 1
+                if len(missing_start_samples) < 5:
+                    sample = f"{event.get('dtstart_key','DTSTART')}:{event.get('dtstart','')}"
+                    if sample not in missing_start_samples:
+                        missing_start_samples.append(sample)
             fields = self._build_fields(event)
             key = self._event_key(event)
             if not fields:
@@ -263,4 +280,11 @@ class FeishuBaseSync:
                     failed_count += 1
                     if first_error is None:
                         first_error = f"创建失败 code={data.get('code')} msg={data.get('msg')} event_key={key}"
-        return {"created": create_count, "updated": update_count, "failed": failed_count, "first_error": first_error}
+        return {
+            "created": create_count,
+            "updated": update_count,
+            "failed": failed_count,
+            "first_error": first_error,
+            "missing_start_count": missing_start_count,
+            "missing_start_samples": missing_start_samples,
+        }

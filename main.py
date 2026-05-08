@@ -115,6 +115,13 @@ class CalDAVSyncManager:
         print(
             f"飞书 Base 同步完成: 新增 {result['created']}，更新 {result['updated']}，失败 {result.get('failed', 0)}"
         )
+        if result.get("missing_start_count"):
+            print(f"开始时间解析失败 {result['missing_start_count']} 条（未写入 start_time，避免出现 1970）")
+            samples = result.get("missing_start_samples") or []
+            if samples:
+                print("开始时间失败样本:")
+                for s in samples:
+                    print(f"- {s}")
         if result.get("first_error"):
             print(f"飞书 Base 首条失败原因: {result['first_error']}")
         return True
