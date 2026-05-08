@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import hashlib
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
@@ -42,21 +42,44 @@ class FeishuBaseSync:
     def _to_unix_ms(value: str) -> Optional[int]:
         if not value:
             return None
-        raw = value
-        if "T" not in raw:
-            return None
-        core = raw.rstrip("Z")
-        fmt = "%Y%m%dT%H%M%S" if len(core) >= 15 else "%Y%m%dT%H%M"
+        raw = value.strip().replace("\r", "")
+        raw = re.sub(r"([+-]\d{4})$", "", raw)
         try:
-            dt = datetime.strptime(core[: len(fmt.replace("%", "").replace("Y", "0000"))], fmt)
+            if raw.endswith("Z"):
+                dt = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                return int(dt.timestamp() * 1000)
+            if "T" in raw:
+                if len(raw) == 15:
+                    dt = datetime.strptime(raw, "%Y%m%dT%H%M%S")
+                elif len(raw) == 13:
+                    dt = datetime.strptime(raw, "%Y%m%dT%H%M")
+                else:
+                    return None
+                return int(dt.timestamp() * 1000)
+            if len(raw) == 8:
+                dt = datetime.strptime(raw, "%Y%m%d")
+                return int(dt.timestamp() * 1000)
+        except Exception:
+            pass
+
+        # 兜底：从任意 CalDAV 时间字符串中提取 YYYYMMDD + 可选 HHMMSS
+        m = re.search(r"(\d{8})(?:T(\d{4,6}))?", raw)
+        if not m:
+            return None
+        day = m.group(1)
+        t = m.group(2)
+        try:
+            if not t:
+                dt = datetime.strptime(day, "%Y%m%d")
+            elif len(t) == 4:
+                dt = datetime.strptime(f"{day}T{t}", "%Y%m%dT%H%M")
+            elif len(t) == 6:
+                dt = datetime.strptime(f"{day}T{t}", "%Y%m%dT%H%M%S")
+            else:
+                return None
             return int(dt.timestamp() * 1000)
         except Exception:
             return None
-
-    @staticmethod
-    def _event_key(event: Dict[str, str]) -> str:
-        seed = f"{event.get('source','')}|{event.get('uid','')}|{event.get('dtstart','')}"
-        return hashlib.sha1(seed.encode("utf-8")).hexdigest()
 
     def _list_all_records(self) -> List[Dict]:
         url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
@@ -81,7 +104,7 @@ class FeishuBaseSync:
         index: Dict[str, str] = {}
         for item in self._list_all_records():
             fields = item.get("fields", {})
-            key = fields.get("event_key")
+            key = fields.get("标题")
             if isinstance(key, list):
                 key = key[0] if key else None
             if key:
@@ -92,28 +115,28 @@ class FeishuBaseSync:
         start_ms = self._to_unix_ms(event.get("dtstart", ""))
         end_ms = self._to_unix_ms(event.get("dtend", ""))
         return {
-            "event_key": self._event_key(event),
-            "source": event.get("source", ""),
-            "calendar_name": event.get("calendar_name", ""),
-            "summary": event.get("summary", ""),
-            "description": event.get("description", ""),
-            "location": event.get("location", ""),
-            "start_time": start_ms,
-            "end_time": end_ms,
-            "uid": event.get("uid", ""),
-            "status": event.get("status", ""),
-            "updated_at": int(time.time() * 1000),
+            "标题": event.get("summary", ""),
+            "来源": event.get("source", ""),
+            "地点": event.get("location", ""),
+            "状态": event.get("status", ""),
+            "开始时间": start_ms,
+            "结束时间": end_ms,
+            "更新时间": int(time.time() * 1000),
         }
 
     def upsert_events(self, events: List[Dict[str, str]]) -> Dict[str, int]:
         existing = self._build_existing_index()
         create_count = 0
         update_count = 0
+        failed_count = 0
+        first_error = None
         create_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
 
         for event in events:
             fields = self._build_fields(event)
-            key = fields["event_key"]
+            key = fields.get("标题")
+            if not key:
+                continue
             record_id = existing.get(key)
             if record_id:
                 update_url = f"{create_url}/{record_id}"
@@ -121,9 +144,17 @@ class FeishuBaseSync:
                 data = resp.json()
                 if data.get("code") == 0:
                     update_count += 1
+                else:
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = data
             else:
                 resp = requests.post(create_url, headers=self._headers(), json={"fields": fields}, timeout=20)
                 data = resp.json()
                 if data.get("code") == 0:
                     create_count += 1
-        return {"created": create_count, "updated": update_count}
+                else:
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = data
+        return {"created": create_count, "updated": update_count, "failed": failed_count, "first_error": first_error}

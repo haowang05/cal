@@ -90,9 +90,22 @@ class CalDAVSyncManager:
         if not all([app_id, app_secret, app_token, table_id]):
             print("未配置飞书 Base 所需 APP_ID/APP_SECRET/APP_TOKEN/TABLE_ID，跳过写入。")
             return False
+        def should_skip(event: dict) -> bool:
+            name = str(event.get("calendar_name", "")).strip()
+            return ("国务院假期及传统节日" in name) or ("节假日" in name and "国务院" in name)
+
+        filtered_events = [e for e in events if not should_skip(e)]
+        skipped = len(events) - len(filtered_events)
+        print(f"写入前事件统计: 原始 {len(events)}，过滤后 {len(filtered_events)}")
+        if skipped:
+            print(f"已过滤 {skipped} 条节假日日历事件（2026国务院假期及传统节日）")
         client = FeishuBaseSync(app_id, app_secret, app_token, table_id)
-        result = client.upsert_events(events)
-        print(f"飞书 Base 同步完成: 新增 {result['created']}，更新 {result['updated']}")
+        result = client.upsert_events(filtered_events)
+        print(
+            f"飞书 Base 同步完成: 新增 {result['created']}，更新 {result['updated']}，失败 {result.get('failed', 0)}"
+        )
+        if result.get("first_error"):
+            print(f"飞书 Base 首条失败原因: {result['first_error']}")
         return True
 
     def run_full_workflow(self, cleanup_days: int = 7) -> bool:
