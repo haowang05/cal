@@ -9,8 +9,25 @@ from typing import Dict, List
 
 def parse_ics_content(ics_data: str) -> Dict[str, str]:
     event_info: Dict[str, str] = {}
-    for raw_line in ics_data.split("\n"):
+
+    # 先做 ICS unfold：以空格/Tab 开头的行是上一行的续行
+    unfolded_lines = []
+    for raw in ics_data.splitlines():
+        if (raw.startswith(" ") or raw.startswith("\t")) and unfolded_lines:
+            unfolded_lines[-1] += raw[1:]
+        else:
+            unfolded_lines.append(raw)
+
+    in_vevent = False
+    for raw_line in unfolded_lines:
         line = raw_line.strip()
+        if line == "BEGIN:VEVENT":
+            in_vevent = True
+            continue
+        if line == "END:VEVENT":
+            break
+        if not in_vevent:
+            continue
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
