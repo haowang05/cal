@@ -126,19 +126,72 @@ class FeishuBaseSync:
 
     def _build_existing_index(self) -> Dict[str, str]:
         index: Dict[str, str] = {}
+        event_key_field = self._field_name("event_key")
+        if not event_key_field:
+            return index
         for item in self._list_all_records():
             fields = item.get("fields", {})
-            key = fields.get("event_key")
+            key = fields.get(event_key_field)
             if isinstance(key, list):
                 key = key[0] if key else None
             if key:
                 index[str(key)] = item["record_id"]
         return index
 
+    def _list_table_fields(self) -> List[Dict]:
+        url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/fields"
+        items = []
+        page_token = None
+        while True:
+            params = {"page_size": 500}
+            if page_token:
+                params["page_token"] = page_token
+            resp = requests.get(url, headers=self._headers(), params=params, timeout=20)
+            data = resp.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"查询字段失败: {data}")
+            payload = data.get("data", {})
+            items.extend(payload.get("items", []))
+            if not payload.get("has_more"):
+                break
+            page_token = payload.get("page_token")
+        return items
+
+    def _field_aliases(self) -> Dict[str, List[str]]:
+        return {
+            "event_key": ["event_key", "事件唯一键", "唯一键"],
+            "source": ["source", "来源", "日历来源"],
+            "calendar_name": ["calendar_name", "日历名", "日历名称"],
+            "summary": ["summary", "标题", "主题"],
+            "description": ["description", "描述", "详情"],
+            "location": ["location", "地点", "位置"],
+            "start_time": ["start_time", "开始时间", "开始"],
+            "end_time": ["end_time", "结束时间", "结束"],
+            "uid": ["uid", "UID", "事件UID"],
+            "status": ["status", "状态"],
+            "updated_at": ["updated_at", "更新时间", "同步时间"],
+        }
+
+    def _build_field_map(self) -> Dict[str, str]:
+        table_fields = self._list_table_fields()
+        existing_names = {str(item.get("field_name", "")).strip() for item in table_fields if item.get("field_name")}
+        mapping: Dict[str, str] = {}
+        for canonical, aliases in self._field_aliases().items():
+            for name in aliases:
+                if name in existing_names:
+                    mapping[canonical] = name
+                    break
+        return mapping
+
+    def _field_name(self, canonical_name: str) -> Optional[str]:
+        if not hasattr(self, "_resolved_field_map"):
+            self._resolved_field_map = self._build_field_map()
+        return self._resolved_field_map.get(canonical_name)
+
     def _build_fields(self, event: Dict[str, str]) -> Dict:
         start_ms = self._to_unix_ms(event.get("dtstart", ""), event.get("dtstart_key", ""))
         end_ms = self._to_unix_ms(event.get("dtend", ""), event.get("dtend_key", ""))
-        return {
+        canonical_values = {
             "event_key": self._event_key(event),
             "source": event.get("source", ""),
             "calendar_name": event.get("calendar_name", ""),
@@ -151,6 +204,12 @@ class FeishuBaseSync:
             "status": event.get("status", ""),
             "updated_at": int(time.time() * 1000),
         }
+        fields = {}
+        for canonical, value in canonical_values.items():
+            actual = self._field_name(canonical)
+            if actual:
+                fields[actual] = value
+        return fields
 
     def upsert_events(self, events: List[Dict[str, str]]) -> Dict[str, int]:
         existing = self._build_existing_index()
@@ -162,7 +221,12 @@ class FeishuBaseSync:
 
         for event in events:
             fields = self._build_fields(event)
-            key = fields["event_key"]
+            key = self._event_key(event)
+            if not fields:
+                failed_count += 1
+                if first_error is None:
+                    first_error = "写入失败：目标多维表未匹配到任何可用字段"
+                continue
             record_id = existing.get(key)
             if record_id:
                 update_url = f"{create_url}/{record_id}"
