@@ -44,7 +44,7 @@ class FeishuBaseSync:
     def _to_unix_ms(value: str, key: str = "") -> Optional[int]:
         if not value:
             return None
-        raw = value.strip().replace("\r", "")
+        raw = value.strip().replace("\r", "").strip("\"")
         key = (key or "").strip()
 
         tz_name = None
@@ -58,11 +58,25 @@ class FeishuBaseSync:
             explicit_offset = offset_match.group(1)
 
         try:
+            # 支持 epoch 秒/毫秒
+            if raw.isdigit():
+                ts = int(raw)
+                if ts > 10_000_000_000:  # ms
+                    return ts
+                if ts > 1_000_000_000:  # s
+                    return ts * 1000
             if raw.endswith("Z"):
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
                 return int(dt.timestamp() * 1000)
             if explicit_offset:
                 dt = datetime.strptime(raw, "%Y%m%dT%H%M%S%z")
+                return int(dt.timestamp() * 1000)
+            # 支持 ISO-8601（例如 2026-05-08T09:00:00+08:00）
+            if "-" in raw and "T" in raw:
+                iso = raw.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo(tz_name or "Asia/Shanghai"))
                 return int(dt.timestamp() * 1000)
             if "T" in raw:
                 if len(raw) == 15:
@@ -206,6 +220,8 @@ class FeishuBaseSync:
         }
         fields = {}
         for canonical, value in canonical_values.items():
+            if canonical in ("start_time", "end_time") and value is None:
+                continue
             actual = self._field_name(canonical)
             if actual:
                 fields[actual] = value
