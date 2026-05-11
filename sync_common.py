@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, List
+
+import requests
 
 
 def parse_ics_content(ics_data: str) -> Dict[str, str]:
@@ -71,3 +74,27 @@ def save_ics(output_root: str, calendar_name: str, index: int, summary: str, ics
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(ics_data)
     return filepath
+
+
+def caldav_request_with_retry(
+    method: str,
+    url: str,
+    *,
+    retries: int = 3,
+    backoff_seconds: float = 1.5,
+    timeout: int = 30,
+    **kwargs,
+):
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return requests.request(method, url, timeout=timeout, **kwargs)
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            if attempt == retries:
+                raise
+            sleep_for = backoff_seconds * (2 ** (attempt - 1))
+            print(f"[WARN] {method} {url} 第 {attempt}/{retries} 次请求失败: {exc}; {sleep_for:.1f}s 后重试")
+            time.sleep(sleep_for)
+    if last_exc:
+        raise last_exc

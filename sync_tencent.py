@@ -8,7 +8,7 @@ from requests.auth import HTTPBasicAuth
 
 from config_manager import CalDAVAccount
 from ics_merger import ICSMerger
-from sync_common import parse_event_xml, parse_ics_content, save_ics
+from sync_common import caldav_request_with_retry, parse_event_xml, parse_ics_content, save_ics
 
 
 class TencentCalDAVSync:
@@ -32,13 +32,13 @@ class TencentCalDAVSync:
     <D:resourcetype/>
   </D:prop>
 </D:propfind>"""
-        response = requests.request(
+        response = caldav_request_with_retry(
             "PROPFIND",
             self.base_url,
             auth=HTTPBasicAuth(self.username, self.password),
             headers={"Content-Type": "application/xml; charset=UTF-8", "Depth": "1"},
             data=body,
-            timeout=15,
+            timeout=30,
         )
         if response.status_code != 207:
             return []
@@ -83,13 +83,13 @@ class TencentCalDAVSync:
     </C:comp-filter>
   </C:filter>
 </C:calendar-query>"""
-        response = requests.request(
+        response = caldav_request_with_retry(
             "REPORT",
             collection_href,
             auth=HTTPBasicAuth(self.username, self.password),
             headers={"Content-Type": "application/xml; charset=UTF-8", "Depth": "1"},
             data=body,
-            timeout=30,
+            timeout=45,
         )
         if response.status_code != 207:
             return []
