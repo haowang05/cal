@@ -55,8 +55,8 @@ def run_vdirsync(config: Dict[str, str], workspace_root: str) -> Tuple[bool, str
             lines.extend(
                 [
                     f"[pair {pair}]",
-                    f"a = {remote}",
-                    f"b = {local}",
+                    f'a = "{remote}"',
+                    f'b = "{local}"',
                     'collections = ["from a"]',
                     'conflict_resolution = "a wins"',
                     "",
@@ -76,6 +76,7 @@ def run_vdirsync(config: Dict[str, str], workspace_root: str) -> Tuple[bool, str
 
         with open(config_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+        print(f"[vdirsyncer] 使用临时配置: {config_path}")
 
         for source in enabled_sources:
             pair = f"{source}_pair"
