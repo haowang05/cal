@@ -104,6 +104,22 @@ class TencentCalDAVSync:
             f.write(response.text)
         return self.parse_and_save_events(response.text, display_name)
 
+    def _candidate_calendar_urls(self):
+        base = self.base_url.rstrip("/")
+        candidates = [
+            base,
+            f"{base}/",
+            f"https://cal.meeting.tencent.com/caldav/{self.username}/calendar/",
+            f"https://cal.meeting.tencent.com/caldav/{self.username}/",
+        ]
+        seen = set()
+        uniq = []
+        for u in candidates:
+            if u and u not in seen:
+                seen.add(u)
+                uniq.append(u)
+        return uniq
+
     def parse_and_save_events(self, xml_data, display_name):
         events = []
         for i, ics_data in enumerate(parse_event_xml(xml_data), 1):
@@ -118,7 +134,7 @@ class TencentCalDAVSync:
         collections = self.discover_collections()
         if not collections:
             print(f"[tencent] 未发现 collection，尝试使用 base_url 作为兜底日历地址: {self.base_url}")
-            collections = [{"name": "默认日历", "href": self.base_url}]
+            collections = [{"name": "默认日历", "href": u} for u in self._candidate_calendar_urls()]
         print(f"[tencent] 发现日历 {len(collections)} 个")
         total_events = []
         for collection in collections:

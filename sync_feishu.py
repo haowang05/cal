@@ -104,6 +104,53 @@ class FeishuCalDAVSync:
             f.write(response.text)
         return self.parse_and_save_events(response.text, display_name)
 
+    def _candidate_calendar_urls(self):
+        base = self.base_url.rstrip("/")
+        candidates = [
+            base,
+            f"{base}/",
+            f"https://caldav.feishu.cn/dav/{self.username}/",
+            f"https://caldav.feishu.cn/dav/{self.username}/calendar/",
+            f"https://caldav.feishu.cn/calendars/{self.username}/",
+        ]
+        # 去重且保序
+        seen = set()
+        uniq = []
+        for u in candidates:
+            if u and u not in seen:
+                seen.add(u)
+                uniq.append(u)
+        return uniq
+
+    def _probe_calendar_url(self):
+        now = datetime.utcnow()
+        start = (now - timedelta(days=1)).strftime("%Y%m%dT%H%M%SZ")
+        end = (now + timedelta(days=1)).strftime("%Y%m%dT%H%M%SZ")
+        body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><C:calendar-data/></D:prop>
+  <C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT">
+    <C:time-range start="{start}" end="{end}"/>
+  </C:comp-filter></C:comp-filter></C:filter>
+</C:calendar-query>"""
+        for url in self._candidate_calendar_urls():
+            try:
+                resp = caldav_request_with_retry(
+                    "REPORT",
+                    url,
+                    auth=HTTPBasicAuth(self.username, self.password),
+                    headers={"Content-Type": "application/xml; charset=UTF-8", "Depth": "1"},
+                    data=body,
+                    timeout=30,
+                )
+                if resp.status_code == 207:
+                    print(f"[feishu] 自动探测到可用日历 URL: {url}")
+                    return url
+                print(f"[feishu] 探测 URL 失败 status={resp.status_code}: {url}")
+            except Exception as e:
+                print(f"[feishu] 探测 URL 异常: {url} -> {e}")
+        return None
+
     def parse_and_save_events(self, xml_data, display_name):
         events = []
         for i, ics_data in enumerate(parse_event_xml(xml_data), 1):
@@ -119,6 +166,13 @@ class FeishuCalDAVSync:
         if not collections:
             print(f"[feishu] 未发现 collection，尝试使用 base_url 作为兜底日历地址: {self.base_url}")
             collections = [{"name": "默认日历", "href": self.base_url}]
+        if len(collections) == 1 and collections[0]["href"].rstrip("/") in (
+            self.base_url.rstrip("/"),
+            "https://caldav.feishu.cn",
+        ):
+            probed = self._probe_calendar_url()
+            if probed:
+                collections = [{"name": "默认日历", "href": probed}]
         print(f"[feishu] 发现日历 {len(collections)} 个")
         total_events = []
         for collection in collections:
