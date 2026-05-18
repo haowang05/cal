@@ -117,14 +117,14 @@ class FeishuCalDAVSync:
     def sync(self):
         collections = self.discover_collections()
         if not collections:
-            if not self.last_error:
-                self.last_error = "未发现任何可用日历 collection"
-            print(f"[feishu] 同步失败: {self.last_error}")
-            return False
+            print(f"[feishu] 未发现 collection，尝试使用 base_url 作为兜底日历地址: {self.base_url}")
+            collections = [{"name": "默认日历", "href": self.base_url}]
         print(f"[feishu] 发现日历 {len(collections)} 个")
         total_events = []
         for collection in collections:
             total_events.extend(self.get_events_by_time_range(collection["href"], collection["name"]))
+        if not total_events and not self.last_error:
+            self.last_error = "collection 可用但拉取事件为 0"
         self.collected_events = total_events
         print(f"[feishu] 拉取事件 {len(total_events)} 条")
         return len(total_events) > 0
