@@ -11,7 +11,10 @@ from sync_common import parse_ics_content
 
 def _build_source_profiles(config: Dict[str, str]) -> List[Dict[str, str]]:
     profiles = []
+    tencent_enabled = str(config.get("ENABLE_TENCENT_SYNC", "false")).lower() in ("1", "true", "yes", "on")
     for source in ("tencent", "feishu"):
+        if source == "tencent" and not tencent_enabled:
+            continue
         p = source.upper()
         username = config.get(f"{p}_USERNAME") or config.get(f"{p}_CALDAV_USERNAME")
         password = config.get(f"{p}_PASSWORD") or config.get(f"{p}_CALDAV_PASSWORD")
@@ -81,9 +84,19 @@ def run_vdirsync(config: Dict[str, str], workspace_root: str) -> Tuple[bool, str
         for source in enabled_sources:
             pair = f"{source}_pair"
             print(f"[vdirsyncer] discover {pair}")
-            subprocess.run(["vdirsyncer", "-c", config_path, "discover", pair], check=False)
+            subprocess.run(
+                ["vdirsyncer", "-c", config_path, "discover", pair],
+                check=False,
+                input="y\n",
+                text=True,
+            )
             print(f"[vdirsyncer] sync {pair}")
-            proc = subprocess.run(["vdirsyncer", "-c", config_path, "sync", pair], check=False)
+            proc = subprocess.run(
+                ["vdirsyncer", "-c", config_path, "sync", pair],
+                check=False,
+                input="y\n",
+                text=True,
+            )
             if proc.returncode != 0:
                 print(f"[vdirsyncer] {pair} 同步失败，退出码 {proc.returncode}")
 

@@ -109,6 +109,7 @@ python main.py --workflow-vdir -v
 # 全局
 ICS_FILE_NAME=latest
 SKIP_HOLIDAY_CALENDAR=true
+ENABLE_TENCENT_SYNC=false
 
 # 飞书 Base
 APP_ID=cli_xxx
@@ -136,6 +137,11 @@ FEISHU_SYNC_DAYS_FUTURE=90
 # 腾讯可选：指定固定可查询日历 URL
 TENCENT_CALENDAR_URL=
 ```
+
+说明：
+
+- 默认只同步飞书源（`ENABLE_TENCENT_SYNC=false`）
+- 如需恢复腾讯同步，改为 `ENABLE_TENCENT_SYNC=true`
 
 ### 手动触发
 
