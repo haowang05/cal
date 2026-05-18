@@ -133,6 +133,8 @@ def collect_events_from_vdir(data_root: str, enabled_sources: List[str]) -> List
     for source in enabled_sources:
         source_root = os.path.join(data_root, source)
         source_count = 0
+        file_count = 0
+        empty_event_files = 0
         if not os.path.isdir(source_root):
             print(f"[vdirsyncer] 源目录不存在: {source_root}")
             continue
@@ -140,6 +142,7 @@ def collect_events_from_vdir(data_root: str, enabled_sources: List[str]) -> List
             for filename in files:
                 if not filename.endswith(".ics"):
                     continue
+                file_count += 1
                 filepath = os.path.join(root, filename)
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
@@ -150,6 +153,7 @@ def collect_events_from_vdir(data_root: str, enabled_sources: List[str]) -> List
 
                 blocks = _extract_vevent_blocks(text)
                 calendar_name = os.path.basename(root) or source
+                parsed_in_file = 0
                 for block in blocks:
                     event = parse_ics_content(block)
                     if not event:
@@ -158,5 +162,11 @@ def collect_events_from_vdir(data_root: str, enabled_sources: List[str]) -> List
                     event["calendar_name"] = calendar_name
                     events.append(event)
                     source_count += 1
+                    parsed_in_file += 1
+                if parsed_in_file == 0:
+                    empty_event_files += 1
+        print(f"[vdirsyncer] 源 {source} 读取 ICS 文件 {file_count} 个")
+        if empty_event_files:
+            print(f"[vdirsyncer] 源 {source} 有 {empty_event_files} 个 ICS 文件未解析出 VEVENT")
         print(f"[vdirsyncer] 源 {source} 收集事件 {source_count} 条")
     return events

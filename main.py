@@ -153,6 +153,7 @@ class CalDAVSyncManager:
             print("vdirsyncer 未检测到可用源配置（TENCENT/FEISHU）。")
             return False
         events = collect_events_from_vdir(data_root, enabled_sources)
+        print(f"[workflow-vdir] 汇总事件 {len(events)} 条，来源: {', '.join(enabled_sources)}")
         if not events:
             print("vdirsyncer 同步后未收集到任何事件。")
             return False
