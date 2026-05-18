@@ -20,6 +20,7 @@ class FeishuCalDAVSync:
         self.output_dir = f"feishu_events_{self.username}"
         self.merger = ICSMerger()
         self.collected_events = []
+        self.last_error = ""
         config = config or {}
         self.sync_days_past = int(config.get("FEISHU_SYNC_DAYS_PAST") or 90)
         self.sync_days_future = int(config.get("FEISHU_SYNC_DAYS_FUTURE") or 90)
@@ -41,6 +42,8 @@ class FeishuCalDAVSync:
             timeout=30,
         )
         if response.status_code != 207:
+            self.last_error = f"discover_collections 失败: status={response.status_code}, body={response.text[:200]}"
+            print(f"[feishu] {self.last_error}")
             return []
         temp_file = self.merger.get_temp_xml_path("feishu", self.username, "collections")
         with open(temp_file, "w", encoding="utf-8") as f:
@@ -92,6 +95,8 @@ class FeishuCalDAVSync:
             timeout=45,
         )
         if response.status_code != 207:
+            self.last_error = f"get_events_by_time_range 失败: status={response.status_code}, calendar={display_name}, body={response.text[:200]}"
+            print(f"[feishu] {self.last_error}")
             return []
         safe_name = "".join(c for c in display_name if c.isalnum() or c in ("-", "_"))
         temp_file = self.merger.get_temp_xml_path("feishu", self.username, f"events_{safe_name}")
@@ -112,9 +117,14 @@ class FeishuCalDAVSync:
     def sync(self):
         collections = self.discover_collections()
         if not collections:
+            if not self.last_error:
+                self.last_error = "未发现任何可用日历 collection"
+            print(f"[feishu] 同步失败: {self.last_error}")
             return False
+        print(f"[feishu] 发现日历 {len(collections)} 个")
         total_events = []
         for collection in collections:
             total_events.extend(self.get_events_by_time_range(collection["href"], collection["name"]))
         self.collected_events = total_events
+        print(f"[feishu] 拉取事件 {len(total_events)} 条")
         return len(total_events) > 0

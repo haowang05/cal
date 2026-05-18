@@ -20,6 +20,7 @@ class TencentCalDAVSync:
         self.output_dir = f"tencent_events_{self.username}"
         self.merger = ICSMerger()
         self.collected_events = []
+        self.last_error = ""
         config = config or {}
         self.sync_days_past = int(config.get("TENCENT_SYNC_DAYS_PAST") or 90)
         self.sync_days_future = int(config.get("TENCENT_SYNC_DAYS_FUTURE") or 90)
@@ -41,6 +42,8 @@ class TencentCalDAVSync:
             timeout=30,
         )
         if response.status_code != 207:
+            self.last_error = f"discover_collections 失败: status={response.status_code}, body={response.text[:200]}"
+            print(f"[tencent] {self.last_error}")
             return []
         temp_file = self.merger.get_temp_xml_path("tencent", self.username, "collections")
         with open(temp_file, "w", encoding="utf-8") as f:
@@ -92,6 +95,8 @@ class TencentCalDAVSync:
             timeout=45,
         )
         if response.status_code != 207:
+            self.last_error = f"get_events_by_time_range 失败: status={response.status_code}, calendar={display_name}, body={response.text[:200]}"
+            print(f"[tencent] {self.last_error}")
             return []
         safe_name = "".join(c for c in display_name if c.isalnum() or c in ("-", "_"))
         temp_file = self.merger.get_temp_xml_path("tencent", self.username, f"events_{safe_name}")
@@ -112,9 +117,14 @@ class TencentCalDAVSync:
     def sync(self):
         collections = self.discover_collections()
         if not collections:
+            if not self.last_error:
+                self.last_error = "未发现任何可用日历 collection"
+            print(f"[tencent] 同步失败: {self.last_error}")
             return False
+        print(f"[tencent] 发现日历 {len(collections)} 个")
         total_events = []
         for collection in collections:
             total_events.extend(self.get_events_by_time_range(collection["href"], collection["name"]))
         self.collected_events = total_events
+        print(f"[tencent] 拉取事件 {len(total_events)} 条")
         return len(total_events) > 0

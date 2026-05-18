@@ -45,17 +45,28 @@ class CalDAVSyncManager:
             return False, []
         handler = handler_class(account, config=self._handler_config(account.account_type))
         success = handler.sync()
-        return success, getattr(handler, "collected_events", [])
+        events = getattr(handler, "collected_events", [])
+        if success:
+            print(f"[{account.account_type}] 账号 {account.account_name} 同步成功，事件 {len(events)} 条")
+        else:
+            err = getattr(handler, "last_error", "") or "未返回事件"
+            print(f"[{account.account_type}] 账号 {account.account_name} 同步失败：{err}")
+        return success, events
 
     def sync_all_accounts(self):
         accounts = self.config_manager.get_accounts()
         success_count = 0
         all_events: List[dict] = []
+        source_counts = {}
         for account in accounts:
             success, events = self.sync_account(account)
             if success:
                 success_count += 1
             all_events.extend(events)
+            source_counts[account.account_type] = source_counts.get(account.account_type, 0) + len(events)
+        if source_counts:
+            detail = ", ".join(f"{k}:{v}" for k, v in source_counts.items())
+            print(f"各源事件统计: {detail}")
         return success_count, all_events
 
     def sync_by_type(self, account_type: str):
