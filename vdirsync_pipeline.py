@@ -69,7 +69,7 @@ def run_vdirsync(config: Dict[str, str], workspace_root: str) -> Tuple[bool, str
                     f"[storage {local}]",
                     'type = "filesystem"',
                     f'path = "{_escape(local_path)}"',
-                    "fileext = .ics",
+                    'fileext = ".ics"',
                     "",
                 ]
             )
