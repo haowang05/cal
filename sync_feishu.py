@@ -24,6 +24,7 @@ class FeishuCalDAVSync:
         config = config or {}
         self.sync_days_past = int(config.get("FEISHU_SYNC_DAYS_PAST") or 90)
         self.sync_days_future = int(config.get("FEISHU_SYNC_DAYS_FUTURE") or 90)
+        self.calendar_url_override = (config.get("FEISHU_CALENDAR_URL") or "").strip()
 
     def discover_collections(self):
         body = """<?xml version="1.0" encoding="UTF-8"?>
@@ -162,7 +163,11 @@ class FeishuCalDAVSync:
         return events
 
     def sync(self):
-        collections = self.discover_collections()
+        if self.calendar_url_override:
+            print(f"[feishu] 使用 FEISHU_CALENDAR_URL: {self.calendar_url_override}")
+            collections = [{"name": "配置日历", "href": self.calendar_url_override}]
+        else:
+            collections = self.discover_collections()
         if not collections:
             print(f"[feishu] 未发现 collection，尝试使用 base_url 作为兜底日历地址: {self.base_url}")
             collections = [{"name": "默认日历", "href": self.base_url}]

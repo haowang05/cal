@@ -2,22 +2,22 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import os
 import sys
 from typing import List
 
 from config_manager import CalDAVAccount, ConfigManager
 from feishu_base_sync import FeishuBaseSync
 from ics_merger import ICSMerger
-from sync_dingtalk import DingTalkCalDAVSync
 from sync_feishu import FeishuCalDAVSync
 from sync_tencent import TencentCalDAVSync
+from vdirsync_pipeline import collect_events_from_vdir, run_vdirsync
 
 
 class CalDAVSyncManager:
     def __init__(self):
         self.config_manager = ConfigManager()
         self.sync_handlers = {
-            "dingtalk": DingTalkCalDAVSync,
             "tencent": TencentCalDAVSync,
             "feishu": FeishuCalDAVSync,
         }
@@ -28,15 +28,14 @@ class CalDAVSyncManager:
 
     def _handler_config(self, account_type: str) -> dict:
         cfg = {}
-        if account_type == "dingtalk":
-            cfg["DINGTALK_SYNC_DAYS_PAST"] = self.config_manager.get_global_config("DINGTALK_SYNC_DAYS_PAST")
-            cfg["DINGTALK_SYNC_DAYS_FUTURE"] = self.config_manager.get_global_config("DINGTALK_SYNC_DAYS_FUTURE")
-        elif account_type == "tencent":
+        if account_type == "tencent":
             cfg["TENCENT_SYNC_DAYS_PAST"] = self.config_manager.get_global_config("TENCENT_SYNC_DAYS_PAST")
             cfg["TENCENT_SYNC_DAYS_FUTURE"] = self.config_manager.get_global_config("TENCENT_SYNC_DAYS_FUTURE")
+            cfg["TENCENT_CALENDAR_URL"] = self.config_manager.get_global_config("TENCENT_CALENDAR_URL")
         elif account_type == "feishu":
             cfg["FEISHU_SYNC_DAYS_PAST"] = self.config_manager.get_global_config("FEISHU_SYNC_DAYS_PAST")
             cfg["FEISHU_SYNC_DAYS_FUTURE"] = self.config_manager.get_global_config("FEISHU_SYNC_DAYS_FUTURE")
+            cfg["FEISHU_CALENDAR_URL"] = self.config_manager.get_global_config("FEISHU_CALENDAR_URL")
         return cfg
 
     def sync_account(self, account: CalDAVAccount):
@@ -148,6 +147,17 @@ class CalDAVSyncManager:
         self.cleanup_temp_files(cleanup_days)
         return True
 
+    def run_vdirsync_workflow(self) -> bool:
+        ok, data_root, enabled_sources = run_vdirsync(self.config_manager.config, os.getcwd())
+        if not ok:
+            print("vdirsyncer 未检测到可用源配置（TENCENT/FEISHU）。")
+            return False
+        events = collect_events_from_vdir(data_root, enabled_sources)
+        if not events:
+            print("vdirsyncer 同步后未收集到任何事件。")
+            return False
+        return self.sync_to_feishu_base(events)
+
 
 def create_parser():
     parser = argparse.ArgumentParser(description="CalDAV 同步工具")
@@ -160,6 +170,7 @@ def create_parser():
     group.add_argument("--merge-all", action="store_true")
     group.add_argument("--cleanup", type=int, nargs="?", const=7, metavar="DAYS")
     group.add_argument("--workflow", type=int, nargs="?", const=7, metavar="DAYS")
+    group.add_argument("--workflow-vdir", action="store_true")
     group.add_argument("--sync-feishu-base", action="store_true")
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser
@@ -193,6 +204,8 @@ def main():
             sys.exit(0 if manager.sync_to_feishu_base(events) else 1)
         if args.workflow is not None:
             sys.exit(0 if manager.run_full_workflow(args.workflow) else 1)
+        if args.workflow_vdir:
+            sys.exit(0 if manager.run_vdirsync_workflow() else 1)
     except Exception as e:
         print(f"程序执行出错: {e}")
         if args.verbose:

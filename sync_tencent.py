@@ -24,6 +24,7 @@ class TencentCalDAVSync:
         config = config or {}
         self.sync_days_past = int(config.get("TENCENT_SYNC_DAYS_PAST") or 90)
         self.sync_days_future = int(config.get("TENCENT_SYNC_DAYS_FUTURE") or 90)
+        self.calendar_url_override = (config.get("TENCENT_CALENDAR_URL") or "").strip()
 
     def discover_collections(self):
         body = """<?xml version="1.0" encoding="UTF-8"?>
@@ -131,7 +132,11 @@ class TencentCalDAVSync:
         return events
 
     def sync(self):
-        collections = self.discover_collections()
+        if self.calendar_url_override:
+            print(f"[tencent] 使用 TENCENT_CALENDAR_URL: {self.calendar_url_override}")
+            collections = [{"name": "配置日历", "href": self.calendar_url_override}]
+        else:
+            collections = self.discover_collections()
         if not collections:
             print(f"[tencent] 未发现 collection，尝试使用 base_url 作为兜底日历地址: {self.base_url}")
             collections = [{"name": "默认日历", "href": u} for u in self._candidate_calendar_urls()]

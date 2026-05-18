@@ -47,7 +47,7 @@ class ConfigManager:
         self._parse_accounts()
 
     def _parse_accounts(self):
-        account_types = ["DINGTALK", "TENCENT", "FEISHU"]
+        account_types = ["TENCENT", "FEISHU"]
 
         for account_type in account_types:
             account_name = self.config.get(f"{account_type}_ACCOUNT_NAME")

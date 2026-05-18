@@ -1,11 +1,11 @@
 # CalDAV Sync -> Feishu Base
 
-将多个 CalDAV 日历（钉钉 / 腾讯 / 飞书）同步到飞书多维表（Base）。
+将 CalDAV 日历（腾讯 / 飞书）同步到飞书多维表（Base）。
 
 ## 功能说明
 
 - 拉取 CalDAV 事件并生成 ICS 文件
-- 合并输出 `public/dingtalk_latest.ics`、`public/all_calendars_latest.ics`
+- 合并输出 `public/all_calendars_latest.ics`
 - Upsert 写入飞书多维表（同一事件不会重复新增）
 - 支持 GitHub Actions 定时运行
 
@@ -58,11 +58,12 @@ cp .env.example .env
   - `APP_SECRET`
   - `APP_TOKEN`
   - `TABLE_ID`
-- 至少一个 CalDAV 账号（如钉钉）：
-  - `DINGTALK_ACCOUNT_NAME`
-  - `DINGTALK_USERNAME`
-  - `DINGTALK_PASSWORD`
-  - `DINGTALK_URL`
+- 至少一个 CalDAV 账号（腾讯或飞书）：
+  - `TENCENT_*` 或 `FEISHU_*`
+- 如果飞书 discover 失败（常见 400/404），请额外配置：
+  - `FEISHU_CALENDAR_URL`（必须是可 `REPORT` 的具体日历路径，不是根域名）
+- 如果腾讯 discover 失败或事件为 0，可配置：
+  - `TENCENT_CALENDAR_URL`
 
 ### 3) 常用命令
 
@@ -74,13 +75,13 @@ python main.py --list
 python main.py --sync-all
 
 # 只同步某个类型
-python main.py --sync-type dingtalk
+python main.py --sync-type tencent
 
 # 只执行写入飞书 Base（会先拉取各账号事件）
 python main.py --sync-feishu-base -v
 
-# 全流程（拉取 + 合并 + 写入 + 清理）
-python main.py --workflow -v
+# 全流程（GitHub Actions 同款：vdirsyncer 拉取 + 写入飞书 Base）
+python main.py --workflow-vdir -v
 ```
 
 ## GitHub Actions 使用（重点：Secrets）
@@ -95,7 +96,7 @@ python main.py --workflow -v
 
 ### 推荐方式：只配一个 Secret（`SYNC_ENV`）
 
-本项目工作流会把 `secrets.SYNC_ENV` 直接写入 `.env`，所以你只要配一个多行 Secret。
+本项目工作流会把 `secrets.SYNC_ENV` 直接写入 `.env`，并使用 `vdirsyncer` 同步 CalDAV 数据，所以你只要配一个多行 Secret。
 
 路径：GitHub 仓库 -> `Settings` -> `Secrets and variables` -> `Actions` -> `New repository secret`
 
@@ -115,15 +116,7 @@ APP_SECRET=xxx
 APP_TOKEN=xxx
 TABLE_ID=xxx
 
-# 钉钉 CalDAV
-DINGTALK_ACCOUNT_NAME=钉钉日历
-DINGTALK_USERNAME=xxx
-DINGTALK_PASSWORD=xxx
-DINGTALK_URL=https://calendar.dingtalk.com/dav/{username}/
-DINGTALK_SYNC_DAYS_PAST=90
-DINGTALK_SYNC_DAYS_FUTURE=90
-
-# 腾讯 CalDAV（可选）
+# 腾讯 CalDAV（可选，vdirsyncer 用）
 TENCENT_ACCOUNT_NAME=腾讯会议日历
 TENCENT_USERNAME=
 TENCENT_PASSWORD=
@@ -131,13 +124,17 @@ TENCENT_URL=https://cal.meeting.tencent.com/caldav/{username}/calendar/
 TENCENT_SYNC_DAYS_PAST=90
 TENCENT_SYNC_DAYS_FUTURE=90
 
-# 飞书 CalDAV（可选）
+# 飞书 CalDAV（可选，vdirsyncer 用）
 FEISHU_ACCOUNT_NAME=飞书日历
 FEISHU_USERNAME=
 FEISHU_PASSWORD=
-FEISHU_URL=
+FEISHU_URL=https://caldav.feishu.cn
+FEISHU_CALENDAR_URL=
 FEISHU_SYNC_DAYS_PAST=90
 FEISHU_SYNC_DAYS_FUTURE=90
+
+# 腾讯可选：指定固定可查询日历 URL
+TENCENT_CALENDAR_URL=
 ```
 
 ### 手动触发
@@ -152,3 +149,5 @@ FEISHU_SYNC_DAYS_FUTURE=90
   - 通常是源事件时间异常，脚本已对异常时间戳做拦截并跳过无效时间写入。
 - 只想新增列但不参与同步
   - 可以直接在飞书表里新增，脚本不会写入未映射列，也不会受影响。
+- 不再同步钉钉但想保留历史
+  - 本项目不会执行删除逻辑；停用钉钉后，只是不再写入新的钉钉事件，历史数据会保留在飞书 Base 中。
